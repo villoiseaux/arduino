@@ -23,9 +23,9 @@
 
 #define WIFITIMEOUT 50000
 
-#define WIFI_ERROR 1
-#define MQTT_ERROR 2
-#define SENSOR_ERROR 3
+#define WIFI_ERROR 3
+#define MQTT_ERROR 4
+#define SENSOR_ERROR 2
 
 // Config WiFi parameters
 //#define WLAN_SSID       "Livebox-79ca"
@@ -35,8 +35,11 @@
 //#define WLAN_PASS       "deboutlesdamnesdelaterre"
 
 
-#define WLAN_SSID       "LAX"
-#define WLAN_PASS       "deboutlesdamnesdelaterre"
+//#define WLAN_SSID       "LAX"
+//#define WLAN_PASS       "deboutlesdamnesdelaterre"
+
+#define WLAN_SSID       "DOMO"
+#define WLAN_PASS       "domo1234"
 
 // Config NTP  server 
 ntp* ntpServer; 
