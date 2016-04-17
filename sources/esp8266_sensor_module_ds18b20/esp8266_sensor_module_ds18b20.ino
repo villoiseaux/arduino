@@ -4,6 +4,8 @@
  * Connexion MQTT (IO Adafruit)
  * Connexion NTP 
  * Capteur DS18B20
+ * 
+ * Ajout de la connectifita descendant MQTT (subscribe) 
  * gnd
  * -
  * vcc
@@ -26,6 +28,7 @@
 #define WIFI_ERROR 3
 #define MQTT_ERROR 4
 #define SENSOR_ERROR 2
+#define SENSOR_MISSING 5
 
 // Config WiFi parameters
 //#define WLAN_SSID       "Livebox-79ca"
@@ -96,6 +99,13 @@ Adafruit_MQTT_Publish temperature = Adafruit_MQTT_Publish(&mqtt, TEMPERATURE_FEE
 const char TIME_FEED[] PROGMEM = "/feeds/"AIO_ID"/time";
 Adafruit_MQTT_Publish mqtime = Adafruit_MQTT_Publish(&mqtt, TIME_FEED);
 
+
+// Setup a feed called 'downlink' for subscribing to changes.
+// Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
+const char DOWNLINK_FEED[] PROGMEM = "/feeds/"AIO_ID"/downlink";
+Adafruit_MQTT_Subscribe downlink = Adafruit_MQTT_Subscribe(&mqtt, DOWNLINK_FEED);
+
+
 /*************************** Sketch Code ************************************/
 
 void error(int code) {
@@ -140,17 +150,7 @@ void warning(int code) {
 void setup() {
 
   // Init sensor
-  pinMode(PROG_PIN,INPUT);
   Serial.begin(115200);
-  delay (500);
-  if (digitalRead(PROG_PIN)==LOW) {
-    Serial.println ("\n\n---PROGRAM---\n");
-    while (digitalRead(PROG_PIN)==LOW) {delay (500);}
-    Serial.println("ENTER SSID: ");
-    for (;;) {
-      delay (1000);
-    }
-  }
   unsigned int markTime;
   DS18B20.setResolution(12);
   delay(1000);
@@ -179,6 +179,20 @@ void setup() {
   Serial.println (ntpServer->epochTimeString());
   pinMode(BLUE_LED, OUTPUT);
   digitalWrite(BLUE_LED, LOW);  
+
+  // listen for events
+  int k;    // counter variable
+  char myChar;
+  Serial.println("Wait message on MQTT topic:");
+  int len = strlen_P(DOWNLINK_FEED);
+  for (k = 0; k < len; k++)
+  {
+    myChar =  pgm_read_byte_near(DOWNLINK_FEED + k);
+    Serial.print(myChar);
+  }  
+
+  mqtt.subscribe(&downlink);
+  // connect to adafruit io
   
   connect();
   digitalWrite(BLUE_LED, HIGH);
@@ -195,9 +209,21 @@ void loop() {
   // ping adafruit io a few times to make sure we remain connected
   if(! mqtt.ping(3)) {
     // reconnect to adafruit io    if(! mqtt.connected())
+      warning (MQTT_ERROR);
       connect();
   }
-    
+
+  // this is our 'wait for incoming subscription packets' busy subloop
+  while (subscription = mqtt.readSubscription(1000)) {
+     Serial.println("Message received.");
+     // we only care about the downlink events
+     if (subscription == &downlink) {
+       Serial.println ("This is a downlink message:\n  ");
+       // convert mqtt ascii payload to int
+       Serial.println((char *)downlink.lastread);
+     }
+
+  }  
   // every interval acquire time for logs purposes
   if ((millis()/INTERVAL)!=t) {
     Serial.print (ntpServer->epochTimeString());
@@ -212,7 +238,7 @@ void loop() {
       temperature_data = DS18B20.getTempCByIndex(0);
       Serial.print("Temperature 1: ");
       Serial.println(temperature_data,4);
-      if (temperature_data == (-127.0)) warning(SENSOR_ERROR);
+      if (temperature_data == (-127.0)) warning(SENSOR_MISSING);
       if (temperature_data == (85.0)) warning(SENSOR_ERROR);
     } while (temperature_data == 85.0 || temperature_data == (-127.0));
     digitalWrite(BLUE_LED, HIGH);  
@@ -233,7 +259,7 @@ void loop() {
   }
 }
 
-// connect to adafruit io via MQTT
+// connect to via MQTT
 void connect() {
   int maxcount = 10;
   Serial.print(F("Connecting MQTT server ("AIO_SERVER") ... "));
@@ -241,7 +267,7 @@ void connect() {
   int8_t ret;
 
   while ((ret = mqtt.connect()) != 0) {
-    warning(ret);
+    warning(MQTT_ERROR);
     
     switch (ret) {
       case 1: Serial.println(F("Wrong protocol")); break;
