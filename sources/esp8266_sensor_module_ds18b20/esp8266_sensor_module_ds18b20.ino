@@ -5,7 +5,10 @@
  * Connexion NTP 
  * Capteur DS18B20
  * 
- * Ajout de la connectifita descendant MQTT (subscribe) 
+ * 17/04/2016 Ajout de la connectifvte descendant MQTT (subscribe) 
+ * 18/04/2016 gestion le Relais
+ * 22/04/2016 programation (hold button down during the first sec)
+ * 
  * gnd
  * -
  * vcc
@@ -14,15 +17,18 @@
  * -
  ****************************************************/
 
-// Libraries
+// Standards Libraries
 #include <ESP8266WiFi.h>
 #include "Adafruit_MQTT.h"
 #include "Adafruit_MQTT_Client.h"
 #include <OneWire.h>
 #include <DallasTemperature.h>
-
+#include <EEPROM.h>
+// My libraries
 #include <ntp-client.h>
 
+// STRINGSIZE size of strint to store ssid & pass
+#define STRINGSIZE 40
 #define WIFITIMEOUT 50000
 
 #define WIFI_ERROR 3
@@ -67,6 +73,7 @@ IPAddress timeServer(167,114,231,173); // ntp.midway.ovh
 #define BLUE_LED 2
 #define PROG_PIN 0
 #define ERROR_LED 0
+#define RELAY_PIN 12
 #define ONE_WIRE_BUS 14  // DS18B20 pin
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
@@ -137,43 +144,113 @@ void warning(int code) {
   pinMode(ERROR_LED, OUTPUT);
   digitalWrite(ERROR_LED, HIGH);  
   digitalWrite(BLUE_LED, HIGH);    
-  delay (1000);
   for (i=0;i<code; i++) {
       digitalWrite(ERROR_LED, LOW);  
       delay (300);
       digitalWrite(ERROR_LED, HIGH);  
       delay (300);    
   }
-  delay (1000);
+}
+
+#define ON LOW
+#define OFF HIGH
+
+void programDevice(){
+  char ssid[STRINGSIZE]="";
+  char pass[STRINGSIZE]="";
+  unsigned p=0;
+  char ch;
+  int pstep=0;
+  boolean echo=ON;
+  pinMode (BLUE_LED, OUTPUT);
+  pinMode (ERROR_LED, OUTPUT);
+  Serial.println("Entering program mode");
+  Serial.print("SSID:");
+  while (pstep<2) {
+    if (Serial.available() > 0) {
+      ch=Serial.read();
+      if (ch==10) continue;
+      if (echo==ON) Serial.print(ch);
+      if (ch==13) {// CR is end of string
+        pstep++;
+        p=0;        
+        switch (pstep) {        
+          case 1: Serial.print("\nPASS:"); echo=OFF; break;
+          case 2: Serial.print("DONE"); break;
+        }
+        
+      } else {
+        switch (pstep) {
+          case 0: ssid[p++]=ch; ssid[p]=0;break;
+          case 1: pass[p++]=ch; pass[p]=0;break;
+        }
+      }
+    }
+    // blink leds while entering parameters
+    if ((millis()%1000)>500){
+      digitalWrite(BLUE_LED,LOW);
+      digitalWrite(ERROR_LED,HIGH);
+    } else {
+      digitalWrite(BLUE_LED,HIGH);
+      digitalWrite(ERROR_LED,LOW);
+    }
+  }
+  Serial.print("Programming SSID:"); Serial.println(ssid);
+  for (p=0; p<STRINGSIZE; p++)
+    EEPROM.write(p, ssid[p]);    
+  Serial.print("Programming PASS:"); Serial.println(pass);
+  for (p=0; p<STRINGSIZE; p++)
+    EEPROM.write(p+STRINGSIZE, pass[p]);
+  Serial.println("new SSID in EEPROM\n");
+  EEPROM.commit();
+  digitalWrite(BLUE_LED,HIGH);
+  digitalWrite(ERROR_LED,HIGH);
 }
 
 void setup() {
-
-  // Init sensor
   Serial.begin(115200);
+  Serial.println("\n\nWifi IoT MQTT sensor\nHold push button to enter program mode.");
+  EEPROM.begin(512);
+  delay (5000);
+  // TEST PROGRAMM MODE
+  pinMode(PROG_PIN,INPUT);
+  if (digitalRead(PROG_PIN)==LOW) 
+    programDevice();
+  Serial.println("Starting...");
+  pinMode(RELAY_PIN,OUTPUT);
+  digitalWrite(RELAY_PIN,HIGH);
   unsigned int markTime;
   DS18B20.setResolution(12);
-  delay(1000);
-  Serial.println(F("Wifi IoT MQTT sensor"));
-
+  // Get WIFI values from EEPROM
+  char eSSID[STRINGSIZE];
+  char ePASS[STRINGSIZE];
+  unsigned p;
+  for (p=0; p<STRINGSIZE; p++)
+    eSSID[p]=EEPROM.read(p);
+  for (p=0; p<STRINGSIZE; p++)
+    ePASS[p]=EEPROM.read(STRINGSIZE+p);
+    
   // Connect to WiFi access point.
-  Serial.println(); Serial.println();
-  delay(10);
-  Serial.print(F("Connecting to "));
-  Serial.println(WLAN_SSID);
+  Serial.print("Connecting to AP '");
+  //Serial.println(WLAN_SSID);
+  Serial.print(eSSID);
+  Serial.println("'");
+  //WiFi.begin(WLAN_SSID, WLAN_PASS);
+  WiFi.begin(eSSID, ePASS);
 
-  WiFi.begin(WLAN_SSID, WLAN_PASS);
   markTime=millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(F("."));
+    Serial.print(".");
     if ((millis()-markTime) > WIFITIMEOUT) error(WIFI_ERROR);
   }
   Serial.println();
 
-  Serial.println(F("WiFi connected"));
-  Serial.println(F("IP address: "));
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
+
+  // get GMT time
   Serial.println("Request for Internet time");
   ntpServer = new ntp(localPort,timeServer);
   Serial.println (ntpServer->epochTimeString());
@@ -234,25 +311,27 @@ void loop() {
     // Grab the current state of the sensor
     digitalWrite(BLUE_LED, LOW);  
     do {
+      uint8_t n = DS18B20.getDeviceCount();
+      Serial.print("getDeviceCount: ");
+      Serial.println(n,HEX);
       DS18B20.requestTemperatures(); 
       temperature_data = DS18B20.getTempCByIndex(0);
       Serial.print("Temperature 1: ");
-      Serial.println(temperature_data,4);
+      Serial.print(temperature_data,4);
       if (temperature_data == (-127.0)) warning(SENSOR_MISSING);
       if (temperature_data == (85.0)) warning(SENSOR_ERROR);
     } while (temperature_data == 85.0 || temperature_data == (-127.0));
     digitalWrite(BLUE_LED, HIGH);  
-    Serial.print(F(" Temperature:"));
-    Serial.print(temperature_data);
     char bufferstr[30];
-    delay (100);
-    digitalWrite(BLUE_LED, LOW);  
+    if (ntpServer->epochHours()==0) // everyday correct module time
+      ntpServer->getInternetTime();
     ntpServer->epochTimeString().toCharArray(bufferstr, 30);
     mqtime.publish(bufferstr);
+    digitalWrite(BLUE_LED, LOW);  
     if ((temperature_data>-20) && (temperature_data<100)) {
       // Publish data
       if (! temperature.publish(temperature_data))
-        Serial.print(F(" Failed to publish temperature"));
+        Serial.print(" Failed to publish temperature");
       }    
     Serial.println();
     digitalWrite(BLUE_LED, HIGH);  
@@ -262,7 +341,7 @@ void loop() {
 // connect to via MQTT
 void connect() {
   int maxcount = 10;
-  Serial.print(F("Connecting MQTT server ("AIO_SERVER") ... "));
+  Serial.print("\nConnecting MQTT server ("AIO_SERVER") ... ");
 
   int8_t ret;
 
@@ -270,21 +349,21 @@ void connect() {
     warning(MQTT_ERROR);
     
     switch (ret) {
-      case 1: Serial.println(F("Wrong protocol")); break;
-      case 2: Serial.println(F("ID rejected")); break;
-      case 3: Serial.println(F("Server unavail")); break;
-      case 4: Serial.println(F("Bad user/pass")); break;
-      case 5: Serial.println(F("Not authed")); break;
-      case 6: Serial.println(F("Failed to subscribe")); break;
-      default: Serial.println(F("Connection failed")); break;
+      case 1: Serial.println("Wrong protocol"); break;
+      case 2: Serial.println("ID rejected"); break;
+      case 3: Serial.println("Server unavail"); break;
+      case 4: Serial.println("Bad user/pass"); break;
+      case 5: Serial.println("Not authed"); break;
+      case 6: Serial.println("Failed to subscribe"); break;
+      default: Serial.println("Connection failed"); break;
     }
 
     if(ret >= 0)
       mqtt.disconnect();
 
-    Serial.println(F("Retrying connection..."));
+    Serial.println("Retrying connection...");
     delay(10000);
     maxcount--;  
   }
-  Serial.println(F("MQTT server Connected!"));
+  Serial.println("MQTT server Connected!");
 }
