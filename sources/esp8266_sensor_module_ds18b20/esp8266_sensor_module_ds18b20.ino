@@ -8,6 +8,7 @@
  * 17/04/2016 Ajout de la connectifvte descendant MQTT (subscribe) 
  * 18/04/2016 gestion le Relais
  * 22/04/2016 programation (hold button down during the first sec)
+ * 23/04/2016 Gestion multi capteur
  * 
  * gnd
  * -
@@ -64,19 +65,22 @@ IPAddress timeServer(167,114,231,173); // ntp.midway.ovh
 #define AIO_USERNAME    "jpinon"
 #define AIO_KEY         "78f2cc8dde492223bcb1d15fc24b0d4da0df66e0"
 */
-#define AIO_SERVER      "mare.pinon-hebert.fr"
+#define AIO_SERVER      "mqtt.pinon-hebert.fr"
 #define AIO_SERVERPORT  1883
 #define AIO_USERNAME    "jpinon"
 #define AIO_KEY         "f588rmp"
-#define AIO_ID          "MOBILE"
+#define AIO_ID          "IoT"
 
 #define BLUE_LED 2
 #define PROG_PIN 0
 #define ERROR_LED 0
 #define RELAY_PIN 12
+
+// Dallas One Wire
 #define ONE_WIRE_BUS 14  // DS18B20 pin
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
+byte maxsensors = 0;
 
 // Functions
 void connect();
@@ -99,8 +103,8 @@ Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, AIO_SERVERPORT, MQTT_CLIENTID, M
 
 // Setup feeds for temperature & humidity
 //const char TEMPERATURE_FEED[] PROGMEM = AIO_USERNAME "/feeds/"AIO_ID"/temp";
-const char TEMPERATURE_FEED[] PROGMEM = "/feeds/"AIO_ID"/temp";
-Adafruit_MQTT_Publish temperature = Adafruit_MQTT_Publish(&mqtt, TEMPERATURE_FEED);
+//const char TEMPERATURE_FEED[] PROGMEM = "/feeds/"AIO_ID"/temp";
+//Adafruit_MQTT_Publish temperature = Adafruit_MQTT_Publish(&mqtt, TEMPERATURE_FEED);
 
 //const char TIME_FEED[] PROGMEM = AIO_USERNAME "/feeds/"AIO_ID"/time";
 const char TIME_FEED[] PROGMEM = "/feeds/"AIO_ID"/time";
@@ -114,6 +118,14 @@ Adafruit_MQTT_Subscribe downlink = Adafruit_MQTT_Subscribe(&mqtt, DOWNLINK_FEED)
 
 
 /*************************** Sketch Code ************************************/
+
+void flashled(void)
+{
+  pinMode(BLUE_LED, OUTPUT);
+  digitalWrite(BLUE_LED, HIGH);
+  delay(1);
+  digitalWrite(BLUE_LED, LOW);
+}
 
 void error(int code) {
   int i;
@@ -221,6 +233,7 @@ void setup() {
   digitalWrite(RELAY_PIN,HIGH);
   unsigned int markTime;
   DS18B20.setResolution(12);
+  DS18B20.begin();
   // Get WIFI values from EEPROM
   char eSSID[STRINGSIZE];
   char ePASS[STRINGSIZE];
@@ -280,8 +293,29 @@ unsigned int t=1000000; // index of mesures
 // log every (in millis)
 #define INTERVAL (10*1000) 
 
+char getHexDigit(byte n) {
+  char ch;
+  if ((n>=0) && (n<10)) 
+    ch=48+n;
+  else
+    ch=65+(n-10);
+  return ch;
+}
+
+void address2string(char* buf, byte addr[8]) {
+  // assume buf in 17 bytes length
+  buf[16]=0;
+  for (int i=0; i<8; i++) {
+    buf[i*2]=getHexDigit(addr[i]/16);
+    buf[(i*2)+1]=getHexDigit(addr[i]%16);
+  }
+}
 
 void loop() {
+  int i;
+  byte addr[8];
+  char asciiaddr[17];
+
   Adafruit_MQTT_Subscribe *subscription;
   // ping adafruit io a few times to make sure we remain connected
   if(! mqtt.ping(3)) {
@@ -309,32 +343,38 @@ void loop() {
 
     float temperature_data;
     // Grab the current state of the sensor
-    digitalWrite(BLUE_LED, LOW);  
-    do {
-      uint8_t n = DS18B20.getDeviceCount();
-      Serial.print("getDeviceCount: ");
-      Serial.println(n,HEX);
-      DS18B20.requestTemperatures(); 
-      temperature_data = DS18B20.getTempCByIndex(0);
-      Serial.print("Temperature 1: ");
-      Serial.print(temperature_data,4);
-      if (temperature_data == (-127.0)) warning(SENSOR_MISSING);
-      if (temperature_data == (85.0)) warning(SENSOR_ERROR);
-    } while (temperature_data == 85.0 || temperature_data == (-127.0));
-    digitalWrite(BLUE_LED, HIGH);  
-    char bufferstr[30];
-    if (ntpServer->epochHours()==0) // everyday correct module time
-      ntpServer->getInternetTime();
-    ntpServer->epochTimeString().toCharArray(bufferstr, 30);
-    mqtime.publish(bufferstr);
-    digitalWrite(BLUE_LED, LOW);  
-    if ((temperature_data>-20) && (temperature_data<100)) {
-      // Publish data
-      if (! temperature.publish(temperature_data))
-        Serial.print(" Failed to publish temperature");
-      }    
-    Serial.println();
-    digitalWrite(BLUE_LED, HIGH);  
+    uint8_t n = DS18B20.getDeviceCount();
+    Serial.print("getDeviceCount: ");
+    Serial.println(n,HEX);
+    for (i=0; i<n; i++) {
+      do {        
+        digitalWrite(BLUE_LED, LOW);  
+        DS18B20.requestTemperaturesByIndex(i); 
+        DS18B20.getAddress(addr, i);
+        address2string(asciiaddr,addr);
+        char TEMPERATURE_FEED[50];
+        strcpy(TEMPERATURE_FEED, "/feeds/"AIO_ID"/temp/");
+        strcat(TEMPERATURE_FEED,asciiaddr);
+        Adafruit_MQTT_Publish temperature = Adafruit_MQTT_Publish(&mqtt, TEMPERATURE_FEED);
+        temperature_data = DS18B20.getTempCByIndex(i);
+        Serial.print("Temperature [");
+        Serial.print(asciiaddr);
+        Serial.print("] ");
+        Serial.print(temperature_data,4);
+        if (temperature_data == (-127.0)) warning(SENSOR_MISSING);
+        if (temperature_data == (85.0)) warning(SENSOR_ERROR);
+        digitalWrite(BLUE_LED, HIGH);  
+        digitalWrite(BLUE_LED, LOW);  
+        if ((temperature_data>-20) && (temperature_data<100)) {
+          // Publish data
+          if (! temperature.publish(temperature_data))
+            Serial.print(" Failed to publish temperature");
+          }    
+        } while (temperature_data == 85.0 || temperature_data == (-127.0));
+        Serial.println();
+        digitalWrite(BLUE_LED, HIGH);  
+
+    }
   }
 }
 
@@ -367,3 +407,8 @@ void connect() {
   }
   Serial.println("MQTT server Connected!");
 }
+
+
+
+
+
