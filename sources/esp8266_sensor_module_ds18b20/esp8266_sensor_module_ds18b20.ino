@@ -9,6 +9,7 @@
  * 18/04/2016 gestion le Relais
  * 22/04/2016 programation (hold button down during the first sec)
  * 23/04/2016 Gestion multi capteur
+ * 24/04/2016 Publication temp ss forme de chaine
  * 
  * gnd
  * -
@@ -54,7 +55,7 @@
 // Config NTP  server 
 ntp* ntpServer; 
 unsigned int localPort = 2390;      // local port to listen for UDP packets
-IPAddress timeServer(167,114,231,173); // ntp.midway.ovh
+IPAddress timeServer(132,163,4,102); // time.nist.gov
 
 //IPAddress timeServer(129, 6, 15, 28); // time.nist.gov NTP server
 
@@ -116,6 +117,29 @@ Adafruit_MQTT_Publish mqtime = Adafruit_MQTT_Publish(&mqtt, TIME_FEED);
 const char DOWNLINK_FEED[] PROGMEM = "/feeds/"AIO_ID"/downlink";
 Adafruit_MQTT_Subscribe downlink = Adafruit_MQTT_Subscribe(&mqtt, DOWNLINK_FEED);
 
+/************* Utilities **************/
+char* ftoa(char* buf, float v, int size, int frac) {
+    int d,i,p=0;
+    size--;
+    frac--;
+    if (v < 0){
+        v=-v;
+        buf[p++]='-';
+    }
+    for (i=size; i>=0; i--) {
+        d=v/pow(10,i);
+        v-=d*pow(10,i);
+        buf[p++]=48+d;
+    }
+    buf[p++]='.';
+    for (i=1; i<=frac+1; i++) {
+        d=v/pow(10,-i);
+        v-=d*pow(10,-i);
+        buf[p++]=48+d;
+    }
+    buf[p]=0;
+    return (buf);
+}
 
 /*************************** Sketch Code ************************************/
 
@@ -342,6 +366,7 @@ void loop() {
     t=millis()/INTERVAL;
 
     float temperature_data;
+    char  temperature_string[20];
     // Grab the current state of the sensor
     uint8_t n = DS18B20.getDeviceCount();
     Serial.print("getDeviceCount: ");
@@ -356,18 +381,23 @@ void loop() {
         strcpy(TEMPERATURE_FEED, "/feeds/"AIO_ID"/temp/");
         strcat(TEMPERATURE_FEED,asciiaddr);
         Adafruit_MQTT_Publish temperature = Adafruit_MQTT_Publish(&mqtt, TEMPERATURE_FEED);
-        temperature_data = DS18B20.getTempCByIndex(i);
+        do {
+          temperature_data = DS18B20.getTempCByIndex(i);
+          if (temperature_data == (-127.0)) warning(SENSOR_MISSING);
+          if (temperature_data == (85.0)) warning(SENSOR_ERROR);
+        } while ((temperature_data == (-127.0) || temperature_data == (85.0)));
         Serial.print("Temperature [");
         Serial.print(asciiaddr);
         Serial.print("] ");
         Serial.print(temperature_data,4);
-        if (temperature_data == (-127.0)) warning(SENSOR_MISSING);
-        if (temperature_data == (85.0)) warning(SENSOR_ERROR);
         digitalWrite(BLUE_LED, HIGH);  
         digitalWrite(BLUE_LED, LOW);  
         if ((temperature_data>-20) && (temperature_data<100)) {
-          // Publish data
-          if (! temperature.publish(temperature_data))
+          // Publish data        
+          ftoa(temperature_string,temperature_data,2,1);
+          Serial.print(" publish string: ");
+          Serial.print (temperature_string);
+          if (! temperature.publish(temperature_string))
             Serial.print(" Failed to publish temperature");
           }    
         } while (temperature_data == 85.0 || temperature_data == (-127.0));
