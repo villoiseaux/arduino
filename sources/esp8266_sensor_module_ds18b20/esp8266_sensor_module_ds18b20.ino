@@ -10,6 +10,7 @@
  * 22/04/2016 programation (hold button down during the first sec)
  * 23/04/2016 Gestion multi capteur
  * 24/04/2016 Publication temp ss forme de chaine
+ * 25/04/2016 Ajout param NAME et insere dans le tupic MQTT
  * 
  * gnd
  * -
@@ -29,6 +30,10 @@
 // My libraries
 #include <ntp-client.h>
 
+#define BUILDD __DATE__
+#define BUILDT __TIME__
+
+
 // STRINGSIZE size of strint to store ssid & pass
 #define STRINGSIZE 40
 #define WIFITIMEOUT 50000
@@ -38,26 +43,16 @@
 #define SENSOR_ERROR 2
 #define SENSOR_MISSING 5
 
-// Config WiFi parameters
-//#define WLAN_SSID       "Livebox-79ca"
-//#define WLAN_PASS       "AD12566717FADDD9D4E9545412"
-
-//#define WLAN_SSID       "nirshnarfnow"
-//#define WLAN_PASS       "deboutlesdamnesdelaterre"
-
-
-//#define WLAN_SSID       "LAX"
-//#define WLAN_PASS       "deboutlesdamnesdelaterre"
-
-#define WLAN_SSID       "DOMO"
-#define WLAN_PASS       "domo1234"
+// Get WIFI values from EEPROM
+char eSSID[STRINGSIZE];
+char ePASS[STRINGSIZE];
+char eNAME[STRINGSIZE];
 
 // Config NTP  server 
 ntp* ntpServer; 
 unsigned int localPort = 2390;      // local port to listen for UDP packets
-IPAddress timeServer(132,163,4,102); // time.nist.gov
 
-//IPAddress timeServer(129, 6, 15, 28); // time.nist.gov NTP server
+IPAddress timeServer(129, 6, 15, 28); // time.nist.gov NTP server
 
 // Config Adafruit IO
 /*
@@ -100,16 +95,7 @@ const char MQTT_USERNAME[] PROGMEM  = AIO_USERNAME;
 const char MQTT_PASSWORD[] PROGMEM  = AIO_KEY;
 
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
-Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, AIO_SERVERPORT, MQTT_CLIENTID, MQTT_USERNAME, MQTT_PASSWORD);/****************************** Feeds ***************************************/
-
-// Setup feeds for temperature & humidity
-//const char TEMPERATURE_FEED[] PROGMEM = AIO_USERNAME "/feeds/"AIO_ID"/temp";
-//const char TEMPERATURE_FEED[] PROGMEM = "/feeds/"AIO_ID"/temp";
-//Adafruit_MQTT_Publish temperature = Adafruit_MQTT_Publish(&mqtt, TEMPERATURE_FEED);
-
-//const char TIME_FEED[] PROGMEM = AIO_USERNAME "/feeds/"AIO_ID"/time";
-const char TIME_FEED[] PROGMEM = "/feeds/"AIO_ID"/time";
-Adafruit_MQTT_Publish mqtime = Adafruit_MQTT_Publish(&mqtt, TIME_FEED);
+Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, AIO_SERVERPORT, MQTT_CLIENTID, MQTT_USERNAME, MQTT_PASSWORD);
 
 
 // Setup a feed called 'downlink' for subscribing to changes.
@@ -142,14 +128,6 @@ char* ftoa(char* buf, float v, int size, int frac) {
 }
 
 /*************************** Sketch Code ************************************/
-
-void flashled(void)
-{
-  pinMode(BLUE_LED, OUTPUT);
-  digitalWrite(BLUE_LED, HIGH);
-  delay(1);
-  digitalWrite(BLUE_LED, LOW);
-}
 
 void error(int code) {
   int i;
@@ -192,17 +170,20 @@ void warning(int code) {
 #define OFF HIGH
 
 void programDevice(){
-  char ssid[STRINGSIZE]="";
-  char pass[STRINGSIZE]="";
+  // these varables will be set after the programm process
+  char ssid[STRINGSIZE]="";       // first 
+  char pass[STRINGSIZE]="";       // second
+  char deviceName[STRINGSIZE]=""; // third
+  
   unsigned p=0;
   char ch;
   int pstep=0;
   boolean echo=ON;
   pinMode (BLUE_LED, OUTPUT);
   pinMode (ERROR_LED, OUTPUT);
-  Serial.println("Entering program mode");
-  Serial.print("SSID:");
-  while (pstep<2) {
+  Serial.println("Entering program mode\nYOU ARE ABOUT TO RECONFIGURE YOUR IoT device\nReset or switch-off your device to cancel.\n");
+  Serial.print("Enter tne Wifi SSID:");
+  while (pstep<3) {
     if (Serial.available() > 0) {
       ch=Serial.read();
       if (ch==10) continue;
@@ -211,15 +192,16 @@ void programDevice(){
         pstep++;
         p=0;        
         switch (pstep) {        
-          case 1: Serial.print("\nPASS:"); echo=OFF; break;
-          case 2: Serial.print("DONE"); break;
+          case 1: Serial.print("\nEnter the Wifi passphrase:"); echo=OFF; break;
+          case 2: Serial.print("\nEnter IoT device name:"); echo=ON; break;          
+          case 3: Serial.print("DONE"); break;
         }
         
       } else {
         switch (pstep) {
           case 0: ssid[p++]=ch; ssid[p]=0;break;
           case 1: pass[p++]=ch; pass[p]=0;break;
-        }
+          case 2: deviceName[p++]=ch; deviceName[p]=0;break;        }
       }
     }
     // blink leds while entering parameters
@@ -234,18 +216,22 @@ void programDevice(){
   Serial.print("Programming SSID:"); Serial.println(ssid);
   for (p=0; p<STRINGSIZE; p++)
     EEPROM.write(p, ssid[p]);    
-  Serial.print("Programming PASS:"); Serial.println(pass);
+  Serial.println("Programming PASS: ******"); 
   for (p=0; p<STRINGSIZE; p++)
     EEPROM.write(p+STRINGSIZE, pass[p]);
-  Serial.println("new SSID in EEPROM\n");
+  Serial.print("Programming IoT name:"); Serial.println(deviceName);
+  for (p=0; p<STRINGSIZE; p++)
+    EEPROM.write(p+(STRINGSIZE*2), deviceName[p]);    
+  Serial.println("new configuration is stored in device EEPROM\n");
   EEPROM.commit();
+
   digitalWrite(BLUE_LED,HIGH);
   digitalWrite(ERROR_LED,HIGH);
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n\nWifi IoT MQTT sensor\nHold push button to enter program mode.");
+  Serial.println("\nBUILD on:"BUILDD" at "BUILDT"\n\nWifi IoT MQTT sensor\nHold push button to enter program mode.");
   EEPROM.begin(512);
   delay (5000);
   // TEST PROGRAMM MODE
@@ -258,15 +244,35 @@ void setup() {
   unsigned int markTime;
   DS18B20.setResolution(12);
   DS18B20.begin();
-  // Get WIFI values from EEPROM
-  char eSSID[STRINGSIZE];
-  char ePASS[STRINGSIZE];
   unsigned p;
+
+  Serial.println("Control EEPROM");
+  char ch;
+  for (p=0; p<(STRINGSIZE*3); p++) {
+    ch=EEPROM.read(p);
+    if (p<10) Serial.print("0");
+    if (p<100) Serial.print("0");
+    Serial.print(p,DEC);
+    Serial.print(" :");
+      if ((ch>31) and (ch<128))
+        Serial.print(ch);
+      else
+        Serial.print(".");      
+      Serial.print(":");
+      if (ch<10) Serial.print("0");
+      Serial.print(ch,HEX);
+      Serial.print(" ");
+      if ((p%10) == 9) Serial.println("");
+  }
+  Serial.println("\nControl EEPROM done");
+
   for (p=0; p<STRINGSIZE; p++)
     eSSID[p]=EEPROM.read(p);
   for (p=0; p<STRINGSIZE; p++)
     ePASS[p]=EEPROM.read(STRINGSIZE+p);
-    
+  for (p=0; p<STRINGSIZE; p++)
+    eNAME[p]=EEPROM.read(STRINGSIZE*2+p);
+  
   // Connect to WiFi access point.
   Serial.print("Connecting to AP '");
   //Serial.println(WLAN_SSID);
@@ -274,6 +280,7 @@ void setup() {
   Serial.println("'");
   //WiFi.begin(WLAN_SSID, WLAN_PASS);
   WiFi.begin(eSSID, ePASS);
+
 
   markTime=millis();
   while (WiFi.status() != WL_CONNECTED) {
@@ -372,13 +379,15 @@ void loop() {
     Serial.print("getDeviceCount: ");
     Serial.println(n,HEX);
     for (i=0; i<n; i++) {
-      do {        
+//      do {        
         digitalWrite(BLUE_LED, LOW);  
         DS18B20.requestTemperaturesByIndex(i); 
         DS18B20.getAddress(addr, i);
         address2string(asciiaddr,addr);
         char TEMPERATURE_FEED[50];
-        strcpy(TEMPERATURE_FEED, "/feeds/"AIO_ID"/temp/");
+        strcpy(TEMPERATURE_FEED, "/feeds/"AIO_ID"/");
+        strcat(TEMPERATURE_FEED,eNAME);
+        strcat(TEMPERATURE_FEED,"/");
         strcat(TEMPERATURE_FEED,asciiaddr);
         Adafruit_MQTT_Publish temperature = Adafruit_MQTT_Publish(&mqtt, TEMPERATURE_FEED);
         do {
@@ -386,21 +395,19 @@ void loop() {
           if (temperature_data == (-127.0)) warning(SENSOR_MISSING);
           if (temperature_data == (85.0)) warning(SENSOR_ERROR);
         } while ((temperature_data == (-127.0) || temperature_data == (85.0)));
-        Serial.print("Temperature [");
-        Serial.print(asciiaddr);
-        Serial.print("] ");
-        Serial.print(temperature_data,4);
+        Serial.print("publish temperature ");
+        Serial.print(temperature_data,1);
         digitalWrite(BLUE_LED, HIGH);  
         digitalWrite(BLUE_LED, LOW);  
         if ((temperature_data>-20) && (temperature_data<100)) {
           // Publish data        
           ftoa(temperature_string,temperature_data,2,1);
-          Serial.print(" publish string: ");
-          Serial.print (temperature_string);
+          Serial.print(" with topic ");
+          Serial.print(TEMPERATURE_FEED);
           if (! temperature.publish(temperature_string))
             Serial.print(" Failed to publish temperature");
           }    
-        } while (temperature_data == 85.0 || temperature_data == (-127.0));
+//        } while (temperature_data == 85.0 || temperature_data == (-127.0));
         Serial.println();
         digitalWrite(BLUE_LED, HIGH);  
 
@@ -410,13 +417,15 @@ void loop() {
 
 // connect to via MQTT
 void connect() {
+  delay (1000);
   int maxcount = 10;
   Serial.print("\nConnecting MQTT server ("AIO_SERVER") ... ");
 
   int8_t ret;
 
   while ((ret = mqtt.connect()) != 0) {
-    warning(MQTT_ERROR);
+    delay (1000);
+
     
     switch (ret) {
       case 1: Serial.println("Wrong protocol"); break;
@@ -428,11 +437,11 @@ void connect() {
       default: Serial.println("Connection failed"); break;
     }
 
-    if(ret >= 0)
+    if(ret >= 0) {
       mqtt.disconnect();
-
-    Serial.println("Retrying connection...");
-    delay(10000);
+      Serial.println("Retrying connection...");
+      warning(MQTT_ERROR);
+    }
     maxcount--;  
   }
   Serial.println("MQTT server Connected!");
