@@ -1,3 +1,4 @@
+
 /***************************************************
  * Themostat d'ambiance
  * Connexion Wifi 
@@ -11,6 +12,7 @@
  * 23/04/2016 Gestion multi capteur
  * 24/04/2016 Publication temp ss forme de chaine
  * 25/04/2016 Ajout param NAME et insere dans le tupic MQTT
+ * 30/04/2016 Changement : programmation par cavalier 13
  * 
  * gnd
  * -
@@ -63,12 +65,12 @@ IPAddress timeServer(129, 6, 15, 28); // time.nist.gov NTP server
 */
 #define AIO_SERVER      "mqtt.pinon-hebert.fr"
 #define AIO_SERVERPORT  1883
-#define AIO_USERNAME    "jpinon"
-#define AIO_KEY         "f588rmp"
+#define AIO_USERNAME    "iot"
+#define AIO_KEY         "4TKxJNu5Dy4sChfJ"
 #define AIO_ID          "IoT"
 
 #define BLUE_LED 2
-#define PROG_PIN 0
+#define PROG_PIN 13
 #define ERROR_LED 0
 #define RELAY_PIN 12
 
@@ -96,7 +98,6 @@ const char MQTT_PASSWORD[] PROGMEM  = AIO_KEY;
 
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, AIO_SERVERPORT, MQTT_CLIENTID, MQTT_USERNAME, MQTT_PASSWORD);
-
 
 // Setup a feed called 'downlink' for subscribing to changes.
 // Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
@@ -233,7 +234,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\nBUILD on:"BUILDD" at "BUILDT"\n\nWifi IoT MQTT sensor\nHold push button to enter program mode.");
   EEPROM.begin(512);
-  delay (5000);
+  
   // TEST PROGRAMM MODE
   pinMode(PROG_PIN,INPUT);
   if (digitalRead(PROG_PIN)==LOW) 
@@ -446,8 +447,5 @@ void connect() {
   }
   Serial.println("MQTT server Connected!");
 }
-
-
-
 
 
