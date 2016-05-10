@@ -13,7 +13,7 @@
  * 24/04/2016 Publication temp ss forme de chaine
  * 25/04/2016 Ajout param NAME et insere dans le tupic MQTT
  * 30/04/2016 Changement : programmation par cavalier 13
- * 
+ * 10/05/2016 Adaptation bluetouth 9600bps pour le port série et 10 pour fin de ligne
  * gnd
  * -
  * vcc
@@ -187,9 +187,9 @@ void programDevice(){
   while (pstep<3) {
     if (Serial.available() > 0) {
       ch=Serial.read();
-      if (ch==10) continue;
+      if (ch==13) continue;
       if (echo==ON) Serial.print(ch);
-      if (ch==13) {// CR is end of string
+      if (ch==10) {// CR is end of string
         pstep++;
         p=0;        
         switch (pstep) {        
@@ -231,7 +231,8 @@ void programDevice(){
 }
 
 void setup() {
-  Serial.begin(115200);
+  //Serial.begin(115200);
+  Serial.begin(9600);
   Serial.println("\nBUILD on:"BUILDD" at "BUILDT"\n\nWifi IoT MQTT sensor\nHold push button to enter program mode.");
   EEPROM.begin(512);
   
