@@ -6,7 +6,6 @@
  * Connexion NTP 
  * Capteur DS18B20
  * 
- * 17/04/2016 Ajout de la connectifvte descendant MQTT (subscribe) 
  * 18/04/2016 gestion le Relais
  * 22/04/2016 programation (hold button down during the first sec)
  * 23/04/2016 Gestion multi capteur
